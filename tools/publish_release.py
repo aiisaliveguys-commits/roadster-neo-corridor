@@ -60,9 +60,18 @@ def main(argv):
 
     tmp = tempfile.mkdtemp()
     zip_path = os.path.join(tmp, "p.zip")
-    gh("GET", place["archive_download_url"], raw_out=zip_path, follow=True,
-       extra_headers=["Authorization: Bearer " + os.environ["GH_TOKEN"]])
-    subprocess.run(["unzip", "-q", "-o", zip_path, "-d", tmp], check=True)
+    # no extra auth header here: gh() already sets one, and a DUPLICATE
+    # Authorization header makes GitHub answer "Bad credentials" as a 200-with-JSON,
+    # which then reads like a corrupt artifact rather than a header mistake
+    gh("GET", place["archive_download_url"], raw_out=zip_path, follow=True)
+    r = subprocess.run(["unzip", "-q", "-o", zip_path, "-d", tmp], capture_output=True, text=True)
+    if r.returncode != 0:
+        head = open(zip_path, "rb").read(200)
+        raise SystemExit(
+            "artifact is not a zip (%d bytes). First bytes: %r\n"
+            "  (a JSON body here means the download was rejected, not that the artifact is broken)"
+            % (os.path.getsize(zip_path), head[:120])
+        )
     src = os.path.join(tmp, "roadster.rbxlx")
     out = os.path.join(tmp, "ROADSTER-Neo-Corridor.rbxlx")
     os.replace(src, out)

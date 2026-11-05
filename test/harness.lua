@@ -349,6 +349,36 @@ local Enum = {
 	RaycastFilterType = { Exclude = 0 },
 }
 
+-- Anything the modules touch by enum name must resolve, or a cosmetic property
+-- (a material, a surface type) breaks the build of a model in a test that is
+-- about suspension. Memoised, so Enum.Material.Metal == Enum.Material.Metal.
+Enum = setmetatable(Enum, {
+	__index = function(t, k)
+		local g = setmetatable({}, {
+			__index = function(u, n)
+				u[n] = { Name = n, Value = 0 }
+				return u[n]
+			end,
+		})
+		t[k] = g
+		return g
+	end,
+})
+
+local Color3Stub = {
+	fromRGB = function(r, g, b)
+		return {
+			R = r / 255,
+			G = g / 255,
+			B = b / 255,
+			Lerp = function(self, o, t)
+				return self
+			end,
+		}
+	end,
+}
+Color3Stub.__index = Color3Stub
+
 local nId = 0
 local function newInstance(cls)
 	nId = nId + 1
@@ -720,6 +750,11 @@ local env = {
 	workspace = workspace,
 	Instance = Instance,
 	Enum = Enum,
+	Color3 = setmetatable({}, {
+		__index = function(_, k)
+			return Color3Stub[k]
+		end,
+	}),
 	Vector3 = V,
 	CFrame = F,
 	RaycastParams = RaycastParams,
@@ -777,6 +812,17 @@ end
 local Config = env.require(configModule)
 local CarController = loadFrom(root .. "src/shared/CarController.lua")
 assert(CarController, "CarController failed to load")
+
+-- CarBuilder is the module that shapes the built-in chassis, and its geometry is
+-- what the suspension numbers are tuned against, so load the real thing here rather
+-- than trusting a hand-written stand-in. Needs Instance + ReplicatedStorage in the
+-- module env, which already has the Config stub.
+env.Instance = {
+	new = function(cls)
+		return newInstance(cls)
+	end,
+}
+local CarBuilder = loadFrom(root .. "src/shared/CarBuilder.lua")
 
 local function buildCar()
 	local model = newInstance("Model")
@@ -1075,6 +1121,14 @@ local function peak(log, key)
 	end
 	return best
 end
+
+local function trough(log, key)
+	local best = 1e18
+	for _, e in ipairs(log) do
+		best = math.min(best, e[key])
+	end
+	return best
+end
 local function netTurn(log)
 	local total = 0
 	for i = 2, #log do
@@ -1210,6 +1264,92 @@ local l5 = simulate("seat", c5, b5, 6, function()
 end, { seat = true })
 check("seat throttle drives the car", peak(l5, "speed") > 120, "peak " .. math.floor(peak(l5, "speed")) .. " studs/s")
 check("seat path keeps ride height", l5[#l5].alt < 4, "altitude " .. l5[#l5].alt)
+
+--------------------------------------------------------------------------------
+-- the built-in demo car: the thing that makes the place file runnable as-is
+--------------------------------------------------------------------------------
+print("== demo car: built-in chassis binds and settles ==")
+local demo = CarBuilder.Build(nil)
+local dmodel, dbody, dseat = demo.model, demo.body, demo.seat
+check(
+	"CarBuilder tags a VehicleRoot",
+	dmodel:GetAttribute("VehicleRoot") == "Chassis",
+	"root = " .. tostring(dmodel:GetAttribute("VehicleRoot"))
+)
+local dparts = dmodel:FindFirstChild("CarParts")
+check(
+	"wheels live inside CarParts (where the controller looks)",
+	dparts ~= nil and #dparts:GetChildren() == 4,
+	dparts and (#dparts:GetChildren() .. " wheels") or "no folder"
+)
+check("seat is named Seat (the controller finds it by name)", dmodel:FindFirstChild("Seat", true) ~= nil, "found")
+local dcar
+local okd, derr = pcall(CarController.new, dmodel)
+if okd then
+	dcar = derr
+end
+check(
+	"CarController.new accepts the demo car",
+	okd and #dcar.Wheels == 4,
+	okd and (#dcar.Wheels .. " wheels") or tostring(derr)
+)
+
+-- What is actually verifiable headlessly: the offsets the CONTROLLER computed from
+-- the model. The stub replaces body.CFrame with a raw table every frame, so wheel
+-- positions in here are not a faithful world; CarController.new's own bookkeeping,
+-- taken once at construction from a real CFrame, is.
+local hubY, hubX, hubZ, rad = {}, {}, {}, {}
+for _, w in ipairs(dcar.Wheels) do
+	hubY[#hubY + 1] = w.Offset.Y
+	hubX[#hubX + 1] = math.abs(w.Offset.X)
+	hubZ[#hubZ + 1] = math.abs(w.Offset.Z)
+	rad[#rad + 1] = w.Radius
+end
+table.sort(hubY)
+table.sort(hubX)
+table.sort(hubZ)
+table.sort(rad)
+local function allNear(t, want)
+	for _, v in ipairs(t) do
+		if math.abs(v - want) > 0.01 then
+			return false
+		end
+	end
+	return true
+end
+check("all four hubs sit above the chassis centre", allNear(hubY, 1.6), "hub Y " .. hubY[1] .. " (design 1.6)")
+check(
+	"track and wheelbase are symmetric",
+	allNear(hubX, 3.1) and allNear(hubZ, 3.9),
+	("x %.1f z %.1f"):format(hubX[1], hubZ[1])
+)
+check("wheel radius matches the suspension maths", allNear(rad, 1.4), "R " .. rad[1])
+
+local dl0 = simulate("demo-settle", dcar, dbody, 3, function()
+	return {}
+end)
+check(
+	"demo car is at rest and grounded after 3s",
+	math.abs(dl0[#dl0].vert) < 0.5 and dl0[#dl0].mode == "GROUND" and dl0[#dl0].alt > 0,
+	("vert %.2f mode %s alt %.1f"):format(dl0[#dl0].vert, dl0[#dl0].mode, dl0[#dl0].alt)
+)
+check(
+	"demo car does not oscillate",
+	math.abs(peak(dl0, "alt") - trough(dl0, "alt")) < 3.0,
+	"swing " .. string.format("%.2f", peak(dl0, "alt") - trough(dl0, "alt"))
+)
+
+local dl1 = simulate("demo-drive", dcar, dbody, 6, function()
+	dseat.Occupant = { Parent = true }
+	dseat.Throttle = 1
+	dseat.Steer = 0
+	return {}
+end)
+check(
+	"seat throttle drives the demo car",
+	peak(dl1, "speed") > 90,
+	"peak " .. math.floor(peak(dl1, "speed")) .. " studs/s"
+)
 
 local allOk = true
 for _, ok in ipairs(results) do

@@ -16,7 +16,7 @@ EXPECT = {
     # service -> {class: [instance names]}
     "ServerScriptService": {"Script": ["main", "VehicleSpawner", "WantedService", "MissionService"]},
     "ReplicatedStorage": {
-        "ModuleScript": ["Config", "CarController", "Remotes", "CityGenerator", "PlayerState"]
+        "ModuleScript": ["Config", "CarController", "Remotes", "CityGenerator", "PlayerState", "CarBuilder"]
     },
     # searched transitively: Studio nests these under StarterPlayer > StarterPlayerScripts,
     # and a published place may clone the hierarchy, so "direct child of this service" is a

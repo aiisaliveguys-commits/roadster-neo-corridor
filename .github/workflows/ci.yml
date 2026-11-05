@@ -72,6 +72,12 @@ jobs:
           done < <(find src test tools -name '*.lua' -print)
           exit $fail
 
+      # Catches calls to functions that do not exist: `luac -p` only proves the
+      # file parses, and two colliding patches once left three calls to a deleted
+      # `prepare()` - which would only have blown up on a player's machine.
+      - name: Undefined-call lint
+        run: lua5.1 tools/lint_globals.lua $(find src test -name '*.lua' | sort)
+
       # The headless physics harness. This is the part that used to eat my time in
       # a 2GB sandbox: it runs the real CarController module against a fake engine
       # (rigid body + actuator model + ground raycast) and asserts behaviour, not

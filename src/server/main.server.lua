@@ -20,6 +20,10 @@ require(ReplicatedStorage:WaitForChild("Remotes")).Ensure()
 
 local ready = Instance.new("BindableEvent")
 ready.Name = "CityReady"
+-- kept after firing: VehicleSpawner may run its join handler either before or after
+-- generation finishes, and it must be able to check for the event AND for the city
+-- folder, not just wait on an event that already fired
+ready.Archivable = false
 ready.Parent = ReplicatedStorage
 
 local CityGenerator = require(game:GetService("ReplicatedStorage"):WaitForChild("CityGenerator"))

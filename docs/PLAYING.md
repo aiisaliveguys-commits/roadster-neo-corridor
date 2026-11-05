@@ -1,6 +1,13 @@
 # Playing it on your PC
 
-Windows 10/11 is the only path that works: **Roblox Studio** (which builds and publishes
+**The short version:** download `ROADSTER-Neo-Corridor.rbxlx` from the [latest release](
+https://github.com/aiisaliveguys-commits/roadster-neo-corridor/releases/latest),
+double-click it, press **Play**. A demo car and the whole city are inside the file, so
+there is nothing to import and nothing to configure. Everything below is the long version.
+
+One thing cannot be removed: Roblox places only run inside Roblox **Studio** on your
+machine (Studio is what publishes and hosts the place), so "open in Studio, press Play" is
+the floor. Windows 10/11 is the only path that works: **Roblox Studio** (which builds and publishes
 the place) ships for Windows and macOS, not Linux. Roblox Player alone is not enough — a
 `.rbxlx` file is not something the player can open.
 
@@ -10,11 +17,12 @@ the place) ships for Windows and macOS, not Linux. Roblox Player alone is not en
 
 ## 2. Get the place file
 
-1. Open **https://github.com/aiisaliveguys-commits/roadster-neo-corridor/actions**
-2. Click the newest run that shows a green **X** (all three jobs: verify, build, audit).
-3. Scroll to **Artifacts** → download **`roadster-place`**.
-4. Unzip it. You get `roadster.rbxlx` (~100 KB — it is only scripts, the city is built at
-   runtime, so a small file is correct and not a broken build).
+Either source works and both are produced by the same CI job:
+
+- **Releases** (recommended): the release asset is the plain `.rbxlx`, no unzip, and it
+  survives a repo being cleaned of old workflow runs.
+- **Actions → newest green run → Artifacts → `roadster-place`**: always the absolute latest
+  commit, but it is a zip and old runs expire after 30 days.
 
 If the artifact is missing, the build job failed — open the run and read the red step. The
 log is the whole point of having CI do this.
@@ -26,13 +34,22 @@ Double-click `roadster.rbxlx`, or Studio → **File → Open from File…**.
 You will see an essentially **empty viewport**. That is expected: the city is procedurally
 generated when the place runs, not baked into the file. Press **Play** and it builds.
 
-## 4. Put the car in (your Tesla import)
+## 4. (Optional) Swap in your Tesla model
 
-The repo deliberately contains no vehicle geometry — you hold the licensed model.
+The place file already contains a built-in demo chassis, built by `src/shared/CarBuilder.lua`,
+so it drives with no import. It is a box-wedge with four box wheels — deliberately simple,
+because it is a fallback and not the product.
+
+**Your imported model always wins.** The spawner looks for one first; only when there is
+nothing to claim does it build the demo car. So importing is still the supported path, just
+no longer a required one. Geometry note: those wheel offsets are the tuned numbers — see
+`CarBuilder`'s header — and the headless suite asserts the built car produces exactly the
+same hub height, track, wheelbase and radius the physics was tested against.
 
 1. In Studio, open the **Toolbox** (View → Toolbox) and find your Tesla-partnered model, or
    drag in a `.rbxm`/`.rbxmx` you already own.
-2. Put it in **ServerStorage** (recommended) or **Workspace**.
+2. Put it in **ServerStorage** (recommended) or **Workspace**. (Demo car is currently in play?
+   It is only built when nothing is claimable, so rejoin after importing.)
 3. Name it something obvious, e.g. `CyberRoadster`.
 4. If the model has no PrimaryPart: select the biggest chassis part → right-click →
    **Set Primary Part** (or set `Model.PrimaryPart` in Properties). The spawner can pick

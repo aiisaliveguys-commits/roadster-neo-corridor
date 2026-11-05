@@ -592,9 +592,6 @@ function CarController:_stepLanding(dt, mass, input, g)
 	-- (A "springs are loaded" count also works but is fragile, because a hard
 	-- landing parks the deflection at its clamp; these three tests are stable.)
 	local upright = math.abs(root.CFrame.RightVector.Y) < 0.45
-	if __LANDPROBE then
-		__LANDPROBE(self.Altitude, self.Vertical, upright, C.AutoLandAltitude)
-	end
 	if self.Altitude < C.AutoLandAltitude and self.Vertical < 25 and upright then
 		self.Mode = MODE.GROUND
 		self:_restoreGroundAuthority()

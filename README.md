@@ -3,8 +3,14 @@
 A Roblox vertical slice: a driveable, **flyable** angular sports car in a procedural open
 city, with GTA-V-flavoured wanted levels, checkpoint missions and an in-car radio.
 
-Everything that needs a GPU or a fat runner runs in **GitHub Actions**, not on a dev box.
-You only ever download an artifact.
+**➡ [Download the place file from the latest release](
+https://github.com/aiisaliveguys-commits/roadster-neo-corridor/releases/latest)** — open the
+`.rbxlx` in Roblox Studio, press Play. City, car, HUD, wanted system and missions are all in
+the file; there is nothing to import and nothing to configure. See
+[docs/PLAYING.md](docs/PLAYING.md).
+
+Everything heavier than a Lua parse runs in **GitHub Actions**, not on a dev box: you only
+ever download an artifact.
 
 ## Why the workflow is shaped like this
 
@@ -115,6 +121,7 @@ GH_TOKEN=... bash tools/token-audit.sh
 - [x] config module, drive model, flight model, landing, boost, HUD attributes
 - [x] headless physics suite wired into CI (18 checks, 1 tracked known-open)
 - [x] procedural city, elevated corridor, rooftop pads
+- [x] built-in demo chassis (`CarBuilder`) so the file is playable untouched
 - [x] vehicle binding for a model you import (no hardcoded mesh), wanted stars, chase
       cruisers, ring missions, HUD, radio
 - [x] place-file artifact check in CI (`tools/check_place.py`)

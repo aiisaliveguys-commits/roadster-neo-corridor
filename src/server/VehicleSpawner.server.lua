@@ -27,6 +27,7 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Remotes = require(ReplicatedStorage:WaitForChild("Remotes"))
+local CarBuilder = require(ReplicatedStorage:WaitForChild("CarBuilder"))
 
 local WHEEL_WORDS = { "wheel", "tire", "tyre", "rim", "hub" }
 local SEAT_WORDS = { "seat", "driver", "chair" }
@@ -141,9 +142,23 @@ local function tag(model)
 			end
 		end
 	end
+	-- The controller only looks for wheels inside a folder named "CarParts", and it
+	-- finds the seat by the literal name "Seat" (FindFirstChild("Seat", true)).
+	-- Tagging parts is therefore not enough on its own - a normally-rigged Toolbox
+	-- car has its wheels loose under the Model, and that hits
+	-- "needs 2+ tagged wheels" and crashes the binding.
+	local carParts = model:FindFirstChild("CarParts")
+	if carParts == nil then
+		carParts = Instance.new("Folder")
+		carParts.Name = "CarParts"
+		carParts.Parent = model
+	end
 	local wheelCount = 0
 	for _, w in pairs(picked) do
 		w:SetAttribute("Role", "Wheel")
+		if w.Parent ~= carParts then
+			w.Parent = carParts
+		end
 		wheelCount = wheelCount + 1
 	end
 
@@ -167,6 +182,9 @@ local function tag(model)
 	end
 	if seat ~= nil then
 		seat:SetAttribute("Role", "Seat")
+		if seat.Name ~= "Seat" and model:FindFirstChild("Seat") == nil then
+			seat.Name = "Seat"
+		end
 	end
 
 	return {
@@ -186,19 +204,17 @@ local function announce(text)
 	end)
 end
 
-local spawned = {}
+local SPAWN_AT = Vector3.new(0, 0, -40) -- on the launch apron, away from the default spawn
 
-local function prepare(model, player)
-	local info = tag(model)
-	if info == nil then
-		announce("found a model named " .. model.Name .. " but could not pick a chassis part from it")
-		return nil
-	end
+-- Binds an already-tagged model: publishes the attributes the other services key
+-- off, drops it on the apron, then hands the assembly to the player.
+local function prepare(model, info, player, spawnPos)
 	model:SetAttribute("Ready", true)
 	if player ~= nil then
 		-- WantedService and MissionService both resolve "this player's car" through
 		-- this; without it the first car in Workspace wins for everybody
 		model:SetAttribute("Owner", player.Name)
+		model.Name = player.Name .. "_Vehicle"
 	end
 
 	if info.Wheels == 0 then
@@ -208,20 +224,23 @@ local function prepare(model, player)
 				.. " - suspension is disabled, the car will sit on its raw boxes"
 		)
 	end
+	if info.Seat == nil then
+		announce("no seat found in " .. model.Name .. " - keyboard input only, no gamepad")
+	end
 
-	-- drop the car onto the apron. A root part whose assembly is already in the
-	-- void will free-fall forever, so position BEFORE unanchoring.
+	-- position BEFORE unanchoring: an unanchored assembly dropped before the ground
+	-- exists under it free-falls forever and trips the fall recovery
 	if model.PrimaryPart == nil then
 		model.PrimaryPart = info.Root
 	end
-	model:PivotTo(CFrame.new(0, 8, 0) * CFrame.Angles(0, math.rad(180), 0))
+	model:PivotTo(CFrame.new(spawnPos or SPAWN_AT))
 
 	if player ~= nil then
 		task.spawn(function()
-			-- ownership is per-ASSEMBLY and belongs on the root part of it; calling
-			-- it on every descendant is both wasteful and wrong once the wheels are
-			-- welded. Async first (the non-deprecated API), plain call as fallback
-			-- so this also runs in older Studio builds.
+			-- ownership is per-ASSEMBLY and belongs on the root part of it; calling it
+			-- on every descendant is wasteful and wrong once the wheels are welded.
+			-- Async first (the non-deprecated API), plain call as fallback so this also
+			-- runs in older Studio builds.
 			local ok = false
 			if info.Root.SetNetworkOwnerAsync then
 				ok = pcall(function()
@@ -241,6 +260,21 @@ local function prepare(model, player)
 	return info
 end
 
+local spawned = {}
+local demoTaken = false
+
+local function spawnDemo(player)
+	local model = CarBuilder.Build(nil).model
+	model.Parent = Workspace
+	local info = tag(model)
+	if info == nil then
+		announce("the built-in demo chassis failed to bind, which means CarBuilder is broken")
+		return nil
+	end
+	prepare(model, info, player, SPAWN_AT)
+	return model
+end
+
 local function claim()
 	local model = findCandidate()
 	if model == nil then
@@ -252,17 +286,16 @@ end
 
 local function onPlayerAdded(player)
 	local function give()
+		-- an imported model always wins. Once one player has claimed it, everyone
+		-- else gets their own demo chassis instead of sharing a single car.
 		local model = claim()
-		if model == nil then
-			announce(
-				"no car model found. Import your Tesla model into Workspace (or put it in"
-					.. " ServerStorage named 'CyberRoadster') and rejoin. Searched: "
-					.. table.concat({ "Workspace", "ReplicatedStorage", "ServerStorage" }, ", ")
-			)
-			return
-		end
-		local info = prepare(model, player)
-		if info ~= nil then
+		if model ~= nil then
+			local info = tag(model)
+			if info == nil then
+				announce("found a model named " .. model.Name .. " but could not pick a chassis part from it")
+				return
+			end
+			prepare(model, info, player, SPAWN_AT)
 			spawned[player] = model
 			announce(
 				"bound "
@@ -274,11 +307,44 @@ local function onPlayerAdded(player)
 					.. " wheel(s)"
 					.. (info.Seat ~= nil and (", seat '" .. info.Seat.Name .. "'") or ", no seat (keyboard only)")
 			)
+			return
+		end
+
+		if demoTaken and player ~= nil then
+			-- second player onward: no imported model to claim, so give them a demo
+			-- car of their own rather than failing
+			local demo = spawnDemo(player)
+			if demo ~= nil then
+				spawned[player] = demo
+			end
+			return
+		end
+
+		demoTaken = true
+		local demo = spawnDemo(player)
+		if demo ~= nil then
+			spawned[player] = demo
+			announce(
+				"no imported model found, so the built-in demo chassis is bound -"
+					.. " drop your Tesla model into Workspace or ServerStorage and rejoin to replace it"
+			)
 		end
 	end
 
-	-- give the importer a beat: Toolbox pastes land a frame or two after join
-	task.delay(1.5, give)
+	-- Two waits, and both matter:
+	--  * the city is generated asynchronously, and a car unanchored before the deck
+	--    exists under it free-falls until the fall recovery resets it - which reads
+	--    as "the physics is broken", not as "you spawned 3 seconds early"
+	--  * a Toolbox paste lands a frame or two after join, so claiming too eagerly
+	--    misses an imported model that is clearly present
+	task.spawn(function()
+		local ready = ReplicatedStorage:FindFirstChild("CityReady")
+		if ready ~= nil and Workspace:FindFirstChild("GeneratedCity") == nil then
+			ready.Event:Wait()
+		end
+		task.wait(1.5)
+		give()
+	end)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

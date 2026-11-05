@@ -14,3 +14,6 @@ place-auth*
 dist/
 scratch_note.py
 tools/__pycache__/
+# the merged place file is built by CI and published to Releases; the local copy is a
+# convenience for opening it in the viewer, never a committed binary
+ROADSTER-Neo-Corridor.rbxlx

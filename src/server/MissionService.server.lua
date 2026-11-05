@@ -20,7 +20,7 @@ local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Remotes = require(ReplicatedStorage:WaitForChild("Remotes"))
 local M = Config.Mission
 
-local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local PlayerState = require(game:GetService("ReplicatedStorage"):WaitForChild("PlayerState"))
 
 local ringsFolder = Instance.new("Folder")
 ringsFolder.Name = "Missions"

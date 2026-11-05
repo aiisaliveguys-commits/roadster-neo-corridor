@@ -26,7 +26,7 @@ local Config = require(ReplicatedStorage:WaitForChild("Config"))
 local Remotes = require(ReplicatedStorage:WaitForChild("Remotes"))
 local W = Config.Wanted
 
-local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local PlayerState = require(game:GetService("ReplicatedStorage"):WaitForChild("PlayerState"))
 
 local TICK = 1 / 20
 local TURN_RATE = 3.2 -- rad/s - the whole reason a cop can be shaken at speed

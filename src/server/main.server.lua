@@ -22,7 +22,7 @@ local ready = Instance.new("BindableEvent")
 ready.Name = "CityReady"
 ready.Parent = ReplicatedStorage
 
-local CityGenerator = require(script.Parent:WaitForChild("CityGenerator"))
+local CityGenerator = require(game:GetService("ReplicatedStorage"):WaitForChild("CityGenerator"))
 
 local city
 task.spawn(function()
@@ -63,7 +63,7 @@ end)
 -- folder, and a timeout there shows up as "the cash counter never updates", which
 -- reads like a HUD bug and not like a missing instance
 local Players = game:GetService("Players")
-local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local PlayerState = require(game:GetService("ReplicatedStorage"):WaitForChild("PlayerState"))
 local function attach(player)
 	PlayerState.attach(player)
 end
@@ -72,9 +72,13 @@ for _, p in ipairs(Players:GetPlayers()) do
 	attach(p)
 end
 
--- services are separate Scripts (not children of this one) so each can be
--- disabled on its own while tuning; they are siblings under ServerScriptService
-for _, name in ipairs({ "PlayerState", "VehicleSpawner", "WantedService", "MissionService" }) do
+-- The three services are sibling Scripts, so each can be disabled on its own while
+-- tuning. CityGenerator and PlayerState live in ReplicatedStorage as ModuleScripts:
+-- Rojo strips only .server/.client from a generated instance name (not .module), so a
+-- "X.module.lua" in src/server would arrive named "X.module" and every
+-- WaitForChild("X") would hang forever. ReplicatedStorage + a plain .lua is the
+-- boring fix that keeps names exact. Both are only required by server code.
+for _, name in ipairs({ "VehicleSpawner", "WantedService", "MissionService" }) do
 	local s = script.Parent:FindFirstChild(name)
 	if s == nil then
 		warn("[Main] missing service: " .. name)

@@ -22,6 +22,12 @@ def gh(method, url, body=None, extra_headers=None, raw_out=None, follow=False):
     if extra_headers:
         for h in extra_headers:
             cmd += ["-H", h]
+    # order matters: the first version checked raw_out and returned before ever
+    # looking at `follow`, so a 302-only body was written instead of the artifact
+    if follow:
+        cmd += ["-L"]
+    if raw_out:
+        cmd += ["-o", raw_out]
     if follow:
         cmd += ["-L"]
     if body is not None:

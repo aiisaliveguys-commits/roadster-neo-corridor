@@ -23,6 +23,7 @@ Config.City = {
 	LiteBuildings = true, -- emissive window bands at night (cheap, big payoff)
 	RooftopProps = true,
 	MergeStatic = false, -- true = merge roads/sidewalks into GeneratedMeshParts (fast, test it)
+	Night = true, -- Lighting pass by the generator; set false to keep Studio's default sky
 }
 
 -- Flight is only interesting if there is a place to fly TO.
@@ -45,11 +46,9 @@ Config.Car = {
 	RideSag = 0.45, -- studs the chassis settles at rest. Stiffness is
 	-- derived from this: k = g / sag, so the ride height
 	-- stays correct no matter how you retune the chassis mass
-	SuspensionDampingRatio = 0.7,
-	MaxSpringG = 8,
-	SettleTime = 0.5, -- seconds the chassis soaks into its springs before input responds -- 1 = critically damped, 0.7 = settles fast, no bounce
-	MaxSpringG = 8,
-	SettleTime = 0.5, -- seconds the chassis soaks into its springs before input responds             -- safety cap on one wheel's share of the load, in g
+	SuspensionDampingRatio = 0.7, -- 1 = critically damped, 0.7 = settles fast, no bounce
+	MaxSpringG = 8, -- safety cap on ONE wheel's share of the load, in g
+	SettleTime = 0.5, -- seconds the chassis soaks into its springs before input responds
 
 	-- grip
 	LateralGripG = 2.2, -- g available sideways (tyre model)
@@ -81,7 +80,7 @@ Config.Car = {
 	YawRate = 58,
 	AttitudeResponse = 6.0, -- how hard attitude chases the target
 	FlightSpeed = 235,
-	FlightTimeConstant = 0.22, -- seconds to close the gap to the requested velocity         -- velocityFactor on the LinearVelocity
+	FlightTimeConstant = 0.22, -- seconds to close the gap to the requested velocity; drives the flight LinearVelocity's MaxForce budget
 	FlightLiftG = 1.06, -- >1 so it lifts off under thrust
 	HoverKp = 6.0,
 	LiftSpeed = 62,

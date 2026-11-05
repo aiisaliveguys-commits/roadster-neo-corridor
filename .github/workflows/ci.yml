@@ -76,8 +76,10 @@ jobs:
       # a 2GB sandbox: it runs the real CarController module against a fake engine
       # (rigid body + actuator model + ground raycast) and asserts behaviour, not
       # just that the file parses.
-      - name: Headless physics suite
-        run: lua5.1 test/harness.lua | tee physics-report.txt
+      - name: Headless physics suite + config mirror check
+        run: |
+          lua5.1 test/config_drift.lua
+          lua5.1 test/harness.lua | tee physics-report.txt
 
       - name: Summarise
         if: always()

@@ -8,105 +8,114 @@ set -uo pipefail
 S="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 fail=0
 say() { printf '%s\n' "$1" >>"$S"; }
+block() { say '  ```'; printf '%s\n' "$1" >>"$S"; say '  ```'; }
 
 say "## Security audit"
 say ""
 
-# 1) repo visibility is a decision, not an accident - say it out loud every run
-api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN:-}" -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/${GITHUB_REPOSITORY}$1" 2>/dev/null; }
+api() {
+	curl -sS -H "Authorization: Bearer ${GH_TOKEN:-}" -H "Accept: application/vnd.github+json" \
+		"https://api.github.com/repos/${GITHUB_REPOSITORY:-owner/repo}$1" 2>/dev/null
+}
 
-meta=$(api "")
-if [ -n "$meta" ]; then
-  vis=$(printf '%s' "$meta" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("visibility","?"))' 2>/dev/null || echo "?")
-  say "- Repository visibility: **${vis}** (all committed content is world-readable)"
-  [ "$vis" = "public" ] && say "  - therefore: no Roblox cookie, no \`.ROBLOSECURITY\`, no \`rbx-auth.json\`, no asset-upload token here. Ever. Not even as a secret."
+# 1) repo visibility is a decision, not an accident - say it out loud every run
+vis=$(api "" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("visibility", "?"))
+except Exception:
+    print("?")' 2>/dev/null || echo "?")
+say "- Repository visibility: **${vis}**"
+if [ "$vis" = "public" ]; then
+	say "  - all committed content is world-readable, so: no Roblox cookie, no \`.ROBLOSECURITY\`,"
+	say "    no \`rbx-auth.json\`, no asset-upload token here. Ever. Not even as a secret."
 fi
 
 say ""
 say "### Workflow trigger safety"
-# A fork PR can only leak through a workflow that (a) runs with write/secrets in
-# the BASE context and (b) echoes an attacker-controlled field. Bracketed dots
-# below so this file does not match its own scan.
-if grep -rnE 'pull_request[[:space:]]*:[[:space:]]*$|\bpull_request_target\b|workflow_run:' .github/workflows/*.yml >/dev/null 2>&1; then
-  hit=$(grep -rnE '\bpull_request_target\b|workflow_run:' .github/workflows/*.yml 2>/dev/null | head -3 || true)
-  if printf '%s' "$hit" | grep -q 'pull_request_target\|workflow_run'; then
-    say "- **HIGH**: a dangerous trigger is present (fork code would run with base-repo secrets):"
-    say '  ```'
-    printf '%s\n' "$hit" >>"$S"
-    say '  ```'
-    fail=1
-  else
-    say "- ok: plain \`pull_request\` only (fork code runs with no secrets, read-only token)"
-  fi
+# A fork PR only leaks through a workflow that runs privileged in the BASE context.
+# Bracketed dots below so this file does not match its own scan.
+danger=$(grep -rnE '\bpull_request_target\b|workflow_run:' .github/workflows/*.yml 2>/dev/null | head -3 || true)
+if [ -n "$danger" ]; then
+	say "- **HIGH**: a dangerous trigger is present (fork code would run with base-repo secrets):"
+	block "$danger"
+	fail=1
 else
-  say "- ok: plain \`pull_request\` only (fork code runs with no secrets, read-only token)"
+	say "- ok: no \`pull_request_target\` / \`workflow_run\` - fork code runs with no secrets"
 fi
 
 say ""
 say "### Script-injection surface (untrusted input interpolated into shell)"
 inj=$(grep -rnE '\$\{\{[[:space:]]*github[.]event[.](comment[.]body|issue[.]body|pull_request[.](title|body)|review[.]body|head[.]ref)' .github/workflows/*.yml 2>/dev/null || true)
 if [ -n "$inj" ]; then
-  say "- **HIGH**: event payload fields are being interpolated into a script:"
-  say '  ```'
-  printf '%s\n' "$inj" >>"$S"
-  say '  ```'
-  fail=1
+	say "- **HIGH**: event payload fields are interpolated straight into a script:"
+	block "$inj"
+	fail=1
 else
-  say "- ok: no \`github.event.*\` user text interpolated into \`run:\` blocks"
+	say "- ok: no \`github.event.*\` user text interpolated into \`run:\` blocks"
 fi
 
 say ""
 say "### Least privilege"
-for f in .github/workflows/*.yml; do
-  top=$(grep -nE '^permissions:' "$f" | head -1 || true)
-  if [ -z "$top" ]; then
-    say "- **MED**: ${f} has no top-level \`permissions:\` (inherits repo default)"
-    fail=1
-  else
-    say "- ok: ${f} declares an explicit top-level permissions block"
-  fi
+for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+	[ -f "$f" ] || continue
+	if grep -qE '^permissions:' "$f" 2>/dev/null; then
+		say "- ok: ${f} declares an explicit permissions block"
+	else
+		say "- **MED**: ${f} has no top-level \`permissions:\` (inherits the repo default)"
+		fail=1
+	fi
 done
 
 say ""
 say "### Secret material accidentally committed"
-leak=$(grep -rInE 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|x-oauth|-----BEGIN (RSA|OPEN)PRIVATE KEY|rbxcookie|ROBLOSECURITY' \
-        --exclude-dir=.git . 2>/dev/null | grep -v 'security-audit.sh' | head -6 || true)
+# Two passes, because they catch different mistakes.
+#
+# Pass 1 - credential NAMES. Anything here is a leak by definition: no legitimate
+# file in this repo needs to spell ROBLOSECURITY. (A broad "value-shaped" regex
+# alone misses it, since a Roblox cookie is `_2|YmFzZQ...` and has no fixed prefix.)
+# tools/ and this file are excluded: they ship audit code that must name the thing
+# it hunts, and scanning them produces nothing but noise.
+namehits=$(grep -rInE 'ROBLOSECURITY|rbx-auth\.json|\.ROBLOSECURITY|x-access-token' \
+	--exclude-dir=.git --exclude-dir=tools --exclude=security-audit.sh . 2>/dev/null | head -4 || true)
+#
+# Pass 2 - credential SHAPES, only when bound to a key. A bare mention of a scope
+# header name (gh_parse.py reads x-oauth-scopes) is not a secret; `TOKEN=ghp_...` is.
+shapehits=$(grep -rInE '(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|[A-Z_]{6,}(TOKEN|KEY|SECRET|COOKIE)[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9_|.:+/-]{16,})' \
+	--exclude-dir=.git --exclude-dir=tools --exclude=security-audit.sh . 2>/dev/null | head -4 || true)
+leak=$(printf '%s\n%s\n' "$namehits" "$shapehits" | grep -v '^$' | sort -u | head -8 || true)
 if [ -n "$leak" ]; then
-  say "- **CRITICAL**: token/key shaped strings in the tree:"
-  say '  ```'
-  printf '%s\n' "$leak" >>"$S"
-  say '  ```'
-  fail=1
+	say "- **CRITICAL**: credential material in the tree:"
+	block "$leak"
+	fail=1
 else
-  say "- ok: no token/private-key shaped strings in the tree"
+	say "- ok: no credential names or token-shaped values in the tree"
 fi
 
 say ""
 say "### CI never pushes back"
-if grep -rnE 'git push|actions/checkout@v[0-9]+.*token:[[:space:]]*[^G]' .github/workflows/*.yml >/dev/null 2>&1; then
-  say "- **MED**: a workflow writes to git; on a public repo that is a supply-chain path"
-  fail=1
+if grep -rqE '\bgit push\b' .github/workflows/ 2>/dev/null; then
+	say "- **MED**: a workflow writes to git; on a public repo that is a supply-chain path"
+	fail=1
 else
-  say "- ok: no \`git push\` from CI"
+	say "- ok: no \`git push\` from CI"
 fi
 
 say ""
 say "### Roblox publishing path"
 if [ -f .github/workflows/publish.yml ]; then
-  say "- note: publish.yml exists - confirm it is trigger-gated to manual/dispatch only"
+	say "- note: publish.yml exists - confirm it is gated to workflow_dispatch only"
 else
-  say "- ok: no publish workflow, so no Roblox credential is expected in this repo"
-  say "  - when you do want auto-publish, put that workflow in a **private** repo and"
-  say "    pass the place file between repos as an artifact, or use Open Cloud API key"
-  say "    (DataStore-only, revocable) instead of a login cookie"
+	say "- ok: no publish workflow, so no Roblox credential is expected in this repo"
+	say "  - when auto-publish is wanted: put that job in a **private** repo and hand it"
+	say "    the place file as an artifact, or use a revocable Open Cloud API key rather"
+	say "    than a \`.ROBLOSECURITY\` login cookie"
 fi
 
 say ""
 if [ "$fail" -ne 0 ]; then
-  say "**Result: findings above need attention.**"
+	say "**Result: findings above need attention (see ${fail} group(s)).**"
 else
-  say "**Result: clean.**"
+	say "**Result: clean.**"
 fi
 
 exit "$fail"

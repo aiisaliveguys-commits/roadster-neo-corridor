@@ -32,40 +32,52 @@ fi
 
 say ""
 say "### Workflow trigger safety"
-# A fork PR only leaks through a workflow that runs privileged in the BASE context.
-# Bracketed dots below so this file does not match its own scan.
-danger=$(grep -rnE '\bpull_request_target\b|workflow_run:' .github/workflows/*.yml 2>/dev/null | head -3 || true)
+# Scan YAML STRUCTURE, not prose. This replaced two false alarms: a comment that
+# merely names pull_request_target ("... is never used") scored as HIGH, and an
+# `on: [pull_request]` flow-array parsed as a `pull_request:` key. Trigger keys are
+# only read where they can actually be keys.
+trig=$(awk '/^[[:space:]]*on:/{on=1; print FILENAME" line "NR": "$0; next}
+            on && /^[^[:space:]#]/{on=0}
+            on && /^[[:space:]]+[a-zA-Z_]/{print FILENAME" line "NR": "$0}' \
+	.github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)
+danger=$(printf '%s\n' "$trig" | grep -iE 'pull_request_target|workflow_run|repository_dispatch' | head -3 || true)
 if [ -n "$danger" ]; then
 	say "- **HIGH**: a dangerous trigger is present (fork code would run with base-repo secrets):"
 	block "$danger"
 	fail=1
 else
-	say "- ok: no \`pull_request_target\` / \`workflow_run\` - fork code runs with no secrets"
+	say "- ok: no privileged fork trigger in any \`on:\` block"
+	printf 'Triggers found:\n%s\n' "$trig" | sed 's/^/  /' >>"$S"
 fi
 
 say ""
 say "### Script-injection surface (untrusted input interpolated into shell)"
-inj=$(grep -rnE '\$\{\{[[:space:]]*github[.]event[.](comment[.]body|issue[.]body|pull_request[.](title|body)|review[.]body|head[.]ref)' .github/workflows/*.yml 2>/dev/null || true)
+# Comment lines are dropped: prose *about* injection is not injection.
+inj=$(grep -hnF '${{' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null |
+	sed 's/^[[:space:]]*//' | grep -vE '^#' |
+	grep -E 'github\.event\.(comment\.body|issue\.body|pull_request\.(title|body)|review\.body|head\.ref)' |
+	head -3 || true)
 if [ -n "$inj" ]; then
 	say "- **HIGH**: event payload fields are interpolated straight into a script:"
 	block "$inj"
 	fail=1
 else
-	say "- ok: no \`github.event.*\` user text interpolated into \`run:\` blocks"
+	say "- ok: no \`github.event.*\` user text interpolated into a \`run:\` block"
 fi
 
 say ""
 say "### Least privilege"
-for f in .github/workflows/*.yml .github/workflows/*.yaml; do
-	[ -f "$f" ] || continue
+wrote=0
+for f in $(ls .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null); do
+	wrote=1
 	if grep -qE '^permissions:' "$f" 2>/dev/null; then
-		say "- ok: ${f} declares an explicit permissions block"
+		say "- ok: ${f} declares an explicit top-level permissions block"
 	else
 		say "- **MED**: ${f} has no top-level \`permissions:\` (inherits the repo default)"
 		fail=1
 	fi
 done
-
+[ "$wrote" = 1 ] || say "- (no workflow files found)"
 say ""
 say "### Secret material accidentally committed"
 # Two passes, because they catch different mistakes.
@@ -76,12 +88,12 @@ say "### Secret material accidentally committed"
 # tools/ and this file are excluded: they ship audit code that must name the thing
 # it hunts, and scanning them produces nothing but noise.
 namehits=$(grep -rInE 'ROBLOSECURITY|rbx-auth\.json|\.ROBLOSECURITY|x-access-token' \
-	--exclude-dir=.git --exclude-dir=tools --exclude=security-audit.sh . 2>/dev/null | head -4 || true)
+	--exclude-dir=.git --exclude-dir=tools --exclude=security-audit.sh --exclude=.gitignore --exclude=.gitattributes . 2>/dev/null | head -4 || true)
 #
 # Pass 2 - credential SHAPES, only when bound to a key. A bare mention of a scope
 # header name (gh_parse.py reads x-oauth-scopes) is not a secret; `TOKEN=ghp_...` is.
 shapehits=$(grep -rInE '(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|[A-Z_]{6,}(TOKEN|KEY|SECRET|COOKIE)[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9_|.:+/-]{16,})' \
-	--exclude-dir=.git --exclude-dir=tools --exclude=security-audit.sh . 2>/dev/null | head -4 || true)
+	--exclude-dir=.git --exclude-dir=tools --exclude=security-audit.sh --exclude=.gitignore --exclude=.gitattributes . 2>/dev/null | head -4 || true)
 leak=$(printf '%s\n%s\n' "$namehits" "$shapehits" | grep -v '^$' | sort -u | head -8 || true)
 if [ -n "$leak" ]; then
 	say "- **CRITICAL**: credential material in the tree:"

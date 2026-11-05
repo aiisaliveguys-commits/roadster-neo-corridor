@@ -1,0 +1,24 @@
+{
+  "name": "roadster-neo-corridor",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "$path": "src/server"
+    },
+    "ReplicatedStorage": {
+      "$path": "src/shared"
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$path": "src/client"
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": { "FilteringEnabled": true, "StreamingEnabled": false }
+    },
+    "Lighting": { "$className": "Lighting" },
+    "SoundService": { "$className": "SoundService" }
+  }
+}

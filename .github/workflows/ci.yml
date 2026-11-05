@@ -1,0 +1,149 @@
+name: CI
+
+# This repo is PUBLIC, so these workflows run for strangers too (via PRs).
+# Two rules kept this safe, and they are enforced by the security-audit job:
+#   1. pull_request gets READ-ONLY permissions and never touches a secret.
+#   2. pull_request_target / fork-with-write access is never used.
+
+permissions: {}
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Format, syntax, headless physics
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.1 (syntax gate + test runner)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends lua5.1
+          luac5.1 -v
+
+      - name: Install stylua
+        run: |
+          ver=2.1.0
+          curl -sSfL -o /tmp/su.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v${ver}/stylua-linux-x86_64.zip"
+          unzip -q -o /tmp/su.zip -d /usr/local/bin
+          stylua --version
+
+      - name: Format check
+        run: stylua --check src test
+
+      - name: Syntax gate (luac -p on every .lua)
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if ! luac5.1 -p "$f" 2>/tmp/err; then
+              echo "::error file=$f:: $(head -c 400 /tmp/err | tr '\n' ' ')"
+              fail=1
+            fi
+          done < <(find src test tools -name '*.lua' -print)
+          exit $fail
+
+      # The headless physics harness. This is the part that used to eat my time in
+      # a 2GB sandbox: it runs the real CarController module against a fake engine
+      # (rigid body + actuator model + ground raycast) and asserts behaviour, not
+      # just that the file parses.
+      - name: Headless physics suite
+        run: lua5.1 test/harness.lua | tee physics-report.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Physics suite"
+            echo '```'
+            tail -n 30 physics-report.txt 2>/dev/null || echo "(no report)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload physics report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physics-report
+          path: physics-report.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  build:
+    name: Build place file
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rojo
+        run: |
+          ver=7.7.1
+          # the linux release asset is a .zip (not .tar.gz, and not the double-gzipped
+          # name my first pass assumed) and unzip does not preserve +x, hence chmod
+          curl -sSfL -o /tmp/rojo.zip \
+            "https://github.com/rojo-rbx/rojo/releases/download/${ver}/rojo-${ver}-linux-x86_64.zip"
+          unzip -q -o /tmp/rojo.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/rojo
+          rojo --version
+
+      - name: Build .rbxlx (Rojo compiles src/ into a real place file)
+        run: |
+          mkdir -p dist
+          rojo build --output dist/roadster.rbxlx
+          ls -la dist
+          test -s dist/roadster.rbxlx
+
+      - name: Upload place file
+        uses: actions/upload-artifact@v4
+        with:
+          name: roadster-place
+          path: dist/roadster.rbxlx
+          retention-days: 30
+
+      - name: Lint the Luau
+        continue-on-error: true
+        run: |
+          ver=0.18.9
+          curl -sSfL -o /tmp/selene.zip \
+            "https://github.com/Kampfkarren/selene/releases/download/${ver}/selene-${ver}-linux.zip"
+          unzip -q -o /tmp/selene.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/selene
+          selene --version && selene src
+
+  # ---------------------------------------------------------------------------
+  # Security audit. Deliberately NOT triggered by pull_request: it reads repo
+  # config and the token's own blast radius, so it must only ever run in a
+  # trusted context (schedule / manual / push to main).
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: Security audit
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Findings are reported, not gating: on a fresh repo things like "no branch
+      # protection" are true but not a breakage. Read the run summary, fix, then
+      # delete this line to make it a hard gate.
+      - name: Audit
+        continue-on-error: true
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: bash tools/security-audit.sh

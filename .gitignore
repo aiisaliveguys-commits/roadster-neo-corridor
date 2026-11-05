@@ -1,0 +1,16 @@
+dist/
+*.rbxlx.lock
+.rbx-flags.json
+Selene.toml
+selene_report.*
+*.log
+node_modules/
+# never let real credentials near this PUBLIC repo
+*.env
+.env*
+.ROBLOSECURITY
+rbx-auth.json
+place-auth*
+dist/
+scratch_note.py
+tools/__pycache__/

@@ -132,6 +132,12 @@ jobs:
           ls -la dist
           test -s dist/roadster.rbxlx
 
+      # The check that was missing: CI was green on a place file whose server logic
+      # was all ModuleScripts - valid XML, opens fine, runs nothing. Validate the
+      # artifact, not just the inputs.
+      - name: Verify the place file actually contains executable scripts
+        run: python3 tools/check_place.py dist/roadster.rbxlx
+
       - name: Upload place file
         uses: actions/upload-artifact@v4
         with:

@@ -38,12 +38,26 @@ the code would have found:
 
 ```
 default.project.json        Rojo mapping: src -> Roblox services
-src/shared/                 ReplicatedStorage (Config, CarController)
-src/server/                 ServerScriptService
-src/client/                 StarterPlayerScripts
-src/server/CityGen.lua        procedural blocks, towers, skyway corridor
+src/shared/   -> ReplicatedStorage   (ModuleScripts, plain .lua)
+src/server/   -> ServerScriptService (.server.lua -> Script, .module stays ModuleScript)
+src/client/   -> StarterPlayerScripts (.client.lua -> LocalScript)
+
+  shared/    Config.lua  CarController.lua  Remotes.lua  CityGenerator.lua  PlayerState.lua
+  server/    main  VehicleSpawner  WantedService  MissionService
+  client/    Bootstrap  HUD  Radio
+```
+
+The filename suffix is the class mapping, and it is load-bearing: with plain `.lua`
+names Rojo built every server file as a **ModuleScript**, which parses, opens in Studio,
+and executes nothing. `tools/check_place.py` asserts the artifact contains real `Script`
+instances, because that bug passed a syntax gate, the physics suite and `rojo build`.
+
+```
 test/harness.lua              headless physics suite (lua5.1 test/harness.lua)
+test/config_drift.lua         the harness Config mirror must match the real Config
+tools/check_place.py          validates the built .rbxlx, not the source
 tools/                        token + security audit scripts
+docs/PLAYING.md               how to get this running on your PC
 ```
 
 ## Working locally
@@ -53,8 +67,10 @@ sudo apt-get install -y lua5.1     # syntax gate + test runner
 brew install stylua rojo            # or the GitHub releases for your platform
 
 stylua -f .stylua.toml src test     # format
+lua5.1 test/config_drift.lua        # tuning mirror in sync
 lua5.1 test/harness.lua             # physics suite, ~1s
-rojo build --output roadster.rbxlx  # place file to open in Studio
+rojo build --output dist/roadster.rbxlx
+python3 tools/check_place.py dist/roadster.rbxlx   # the artifact, not the source
 ```
 
 `rojo build` is the only step that touches Studio-visible output, and it is fast - CI does
@@ -97,6 +113,13 @@ GH_TOKEN=... bash tools/token-audit.sh
 ## Status
 
 - [x] config module, drive model, flight model, landing, boost, HUD attributes
-- [x] headless physics suite wired into CI
-- [ ] city generator, police/wanted, missions, HUD, radio (next)
-- [ ] `SetNetworkOwnerAsync` path for published play
+- [x] headless physics suite wired into CI (18 checks, 1 tracked known-open)
+- [x] procedural city, elevated corridor, rooftop pads
+- [x] vehicle binding for a model you import (no hardcoded mesh), wanted stars, chase
+      cruisers, ring missions, HUD, radio
+- [x] place-file artifact check in CI (`tools/check_place.py`)
+- [ ] audio wired: `Config.Radio.DJIntro` / `AdBump` / `Config.Voice.*` are `0` until
+      you upload the mp3s in `audio/` and paste ids
+- [ ] `VehicleConstraint`-free physics verified in Studio - the harness models the
+      solver, it does not replace it
+- [ ] multiplayer: one car per player is wired, but the mission/wanted loop is solo-tuned

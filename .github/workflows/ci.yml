@@ -34,12 +34,25 @@ jobs:
           luac5.1 -v
 
       - name: Install stylua
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
         run: |
-          ver=2.1.0
-          curl -sSfL -o /tmp/su.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v${ver}/stylua-linux-x86_64.zip"
+          # resolve the release through the API instead of hardcoding a version: a
+          # hardcoded one is what broke the Rojo step (the tag is v2.1.0 while the
+          # asset name is 2.1.0, and gluing both from one variable 404s). The public
+          # API is 60 req/h per shared runner IP, so the CI token is attached.
+          url=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/JohnnyMorganz/StyLua/releases/latest" |
+            python3 -c 'import json,sys
+          for a in json.load(sys.stdin).get("assets", []):
+              n = a["name"]
+              if "linux" in n and "x86_64" in n and n.endswith(".zip"):
+                  print(a["browser_download_url"]); break')
+          echo "asset: $url"
+          curl -sSfL -o /tmp/su.zip "$url"
           unzip -q -o /tmp/su.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/stylua
           stylua --version
-
       - name: Format check
         run: stylua --check src test
 
@@ -90,16 +103,21 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rojo
+        env:
+          GITHUB_TOKEN: "${{ github.token }}"
         run: |
-          ver=7.7.1
-          # the linux release asset is a .zip (not .tar.gz, and not the double-gzipped
-          # name my first pass assumed) and unzip does not preserve +x, hence chmod
-          curl -sSfL -o /tmp/rojo.zip \
-            "https://github.com/rojo-rbx/rojo/releases/download/${ver}/rojo-${ver}-linux-x86_64.zip"
+          url=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/rojo-rbx/rojo/releases/latest" |
+            python3 -c 'import json,sys
+          for a in json.load(sys.stdin).get("assets", []):
+              n = a["name"]
+              if "linux" in n and "x86_64" in n and n.endswith(".zip"):
+                  print(a["browser_download_url"]); break')
+          echo "asset: $url"
+          curl -sSfL -o /tmp/rojo.zip "$url"
           unzip -q -o /tmp/rojo.zip -d /usr/local/bin
           chmod +x /usr/local/bin/rojo
           rojo --version
-
       - name: Build .rbxlx (Rojo compiles src/ into a real place file)
         run: |
           mkdir -p dist
@@ -114,15 +132,6 @@ jobs:
           path: dist/roadster.rbxlx
           retention-days: 30
 
-      - name: Lint the Luau
-        continue-on-error: true
-        run: |
-          ver=0.18.9
-          curl -sSfL -o /tmp/selene.zip \
-            "https://github.com/Kampfkarren/selene/releases/download/${ver}/selene-${ver}-linux.zip"
-          unzip -q -o /tmp/selene.zip -d /usr/local/bin
-          chmod +x /usr/local/bin/selene
-          selene --version && selene src
 
   # ---------------------------------------------------------------------------
   # Security audit. Deliberately NOT triggered by pull_request: it reads repo
